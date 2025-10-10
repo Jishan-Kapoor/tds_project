@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pygithub
+requests
+openai
+python-dotenv
+pydantic
+retry
+pandas
