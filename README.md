@@ -1,21 +1,29 @@
-MIT License
+---
+title: TDS Project API Builder
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: static
+sdk_version: "0.0.1"
+app_file: main.py
+pinned: false
+---
 
-Copyright (c) 2025 Jishan-Kapoor
+# TDS Project - LLM-Assisted GitHub Pages Builder
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Summary
+This project is a FastAPI application that automates building, updating, and deploying static web apps to GitHub Pages.  
+It uses an LLM (via AiPipe/OpenAI-compatible API) to generate HTML/JS code based on a JSON request specifying the app brief, required features, and attachments.  
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+It is designed to handle multiple rounds of requests:
+- **Round 1:** Create the repository, generate the app, deploy to GitHub Pages, and notify evaluation endpoint.  
+- **Round 2+:** Update the existing app, regenerate code based on new brief, redeploy, and notify evaluation endpoint.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+---
+
+## Setup
+
+1. **Clone the repository** (already pushed to GitHub and Hugging Face):
+```bash
+git clone https://github.com/Jishan-Kapoor/tds_project.git
+cd tds_project
