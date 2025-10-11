@@ -91,7 +91,7 @@ async def generate_with_llm(prompt: str) -> str:
         response = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: llm_client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4",
                 messages=[
                     {"role": "system",
                      "content": "You are a code generator for simple static web apps. Output only the code or content requested, without extra explanations. Follow all requirements strictly. Use your brain."},
