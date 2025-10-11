@@ -97,7 +97,7 @@ async def generate_with_llm(prompt: str) -> str:
                      "content": "You are a code generator for simple static web apps. Output only the code or content requested, without extra explanations. Follow all requirements strictly. Use your brain."},
                     {"role": "user", "content": prompt}
                 ],
-                timeout=30
+                timeout=500
             )
         )
         content = response.choices[0].message.content
