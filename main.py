@@ -27,26 +27,24 @@ app = FastAPI()
 # Env vars
 MY_SECRET = os.getenv("MY_SECRET")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-AI_PIPE_TOKEN = os.getenv("AI_PIPE_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 
 # Validate environment variables
-if not all([MY_SECRET, GITHUB_PAT, AI_PIPE_TOKEN, GITHUB_USERNAME]):
+if not all([MY_SECRET, GITHUB_PAT, OPENAI_API_KEY, GITHUB_USERNAME]):
     missing = [k for k, v in {"MY_SECRET": MY_SECRET, "GITHUB_PAT": GITHUB_PAT,
-                              "AI_PIPE_TOKEN": AI_PIPE_TOKEN, "GITHUB_USERNAME": GITHUB_USERNAME}.items() if not v]
+                              "OPENAI_API_KEY": OPENAI_API_KEY, "GITHUB_USERNAME": GITHUB_USERNAME}.items() if not v]
     logger.error(f"Missing required environment variables: {', '.join(missing)}")
     raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
 logger.info(f"MY_SECRET: {MY_SECRET}")
 logger.info(f"GITHUB_PAT loaded: {bool(GITHUB_PAT)}")
-logger.info(f"AI_PIPE_TOKEN loaded: {bool(AI_PIPE_TOKEN)}")
+logger.info(f"OPENAI_API_KEY loaded: {bool(OPENAI_API_KEY)}")
 logger.info(f"GITHUB_USERNAME: {GITHUB_USERNAME}")
 
 # LLM client using aipipe.org (OpenRouter proxy, OpenAI-compatible)
 llm_client = OpenAI(
-    api_key="dummy",
-    base_url="https://aipipe.org/openrouter/v1",
-    default_headers={"Authorization": f"Bearer {AI_PIPE_TOKEN}"}
+    api_key=OPENAI_API_KEY
 )
 
 # MIT License text
@@ -93,7 +91,7 @@ async def generate_with_llm(prompt: str) -> str:
         response = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: llm_client.chat.completions.create(
-                model="openai/gpt-4",
+                model="gpt-4",
                 messages=[
                     {"role": "system",
                      "content": "You are a code generator for simple static web apps. Output only the code or content requested, without extra explanations. Follow all requirements strictly. Use your brain."},
