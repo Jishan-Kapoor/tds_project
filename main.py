@@ -100,8 +100,9 @@ async def generate_with_llm(prompt: str) -> str:
             )
         )
         content = response.choices[0].message.content.strip()
-        if content.startswith("```html:disable-run
-            content = content.split("\n", 1)[1].rsplit("\n", 1)[0].strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1]) if lines[-1].startswith("```") else "\n".join(lines[1:])
         logger.info(f"Generated content: {content[:100]}...")
         return content
     except Exception as e:
@@ -186,7 +187,7 @@ MARKDOWN HANDLING - CRITICAL:
         image_file = next((name for name in attachment_names if name.lower().endswith(('.png', '.jpg', '.jpeg'))), 'captcha.png')
         prompt += f"""
 OCR/CAPTCHA HANDLING - CRITICAL:
-- Load Tesseract.js from CDN: <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+- Load Tesseract.js from CDN: <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
 - Use this exact code pattern:
 async function runOCR() {{
   const worker = await Tesseract.createWorker('eng');
