@@ -7,5 +7,4 @@ python-dotenv
 pydantic
 retry
 pandas
-pytesseract
 pillow
