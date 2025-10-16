@@ -1,9 +1,11 @@
 fastapi
-uvicorn
-pygithub
+uvicorn[standard]
+PyGithub
 requests
 openai
 python-dotenv
 pydantic
 retry
 pandas
+pytesseract
+pillow
