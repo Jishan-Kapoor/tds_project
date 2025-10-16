@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import threading
 from typing import Union, Dict, List
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -133,12 +134,13 @@ def _build_code_prompt(brief: str, checks: list[str], attachment_names: list[str
     is_csv_task = any(keyword in brief.lower() for keyword in ['csv', 'sales', 'sum'])
     is_github_task = 'github' in brief.lower() and 'user' in brief.lower()
     has_markdown = any('.md' in name for name in attachment_names)
+    requires_ocr = any(keyword in brief.lower() for keyword in ['ocr', 'extract text', 'captcha', 'image text', 'text from image'])
 
     prompt = f"""Generate a complete, functional index.html file for GitHub Pages that implements: {brief}
 
 CRITICAL REQUIREMENTS:
 1. Include all necessary inline CSS and JavaScript - no external JS files
-2. Use CDN links for libraries (Bootstrap, marked, highlight.js, etc.) from jsdelivr or cdnjs
+2. Use CDN links for libraries (Bootstrap, marked, highlight.js, Tesseract.js, etc.) from jsdelivr or cdnjs
 3. Implement ALL features mentioned in the brief
 4. Handle attachments by referencing them in the same directory (e.g., src='sample.png', fetch('data.csv'))
 5. Make it a complete, working application, not a placeholder
@@ -183,11 +185,36 @@ GITHUB API HANDLING:
     if has_markdown:
         prompt += """
 
-MARKDOWN HANDLING:
-- Load marked library from CDN
-- Use marked.parse() to convert markdown to HTML
+MARKDOWN HANDLING - CRITICAL:
+- Load marked library from CDN: https://cdn.jsdelivr.net/npm/marked/marked.min.js
+- Use marked.parse(markdownText) to convert markdown to HTML
 - Load highlight.js for syntax highlighting if code blocks present
 - Ensure proper rendering in target element
+- Example implementation:
+  fetch('README.md').then(r => r.text()).then(md => {
+    document.getElementById('content').innerHTML = marked.parse(md);
+  });
+- Handle errors gracefully
+"""
+
+    if requires_ocr:
+        prompt += """
+
+OCR/TEXT EXTRACTION - CRITICAL:
+- Use Tesseract.js from CDN: https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js
+- Implement proper image loading and OCR processing
+- Handle both file upload and pre-loaded images
+- Show loading progress and results clearly
+- Example implementation:
+  Tesseract.recognize(
+    imageElementOrBlob,
+    'eng',
+    { logger: m => console.log(m) }
+  ).then(result => {
+    document.getElementById('result').textContent = result.data.text;
+  });
+- Support multiple image formats (PNG, JPG, etc.)
+- Provide clear user interface with file input and result display
 """
 
     prompt += """
@@ -201,6 +228,7 @@ def _build_update_prompt(existing_code: str, brief: str, checks: list[str], task
     is_csv_task = any(keyword in brief.lower() for keyword in ['csv', 'sales', 'sum'])
     is_github_task = task.startswith("github-user-created")
     has_markdown = any('.md' in name for name in attachment_names)
+    requires_ocr = any(keyword in brief.lower() for keyword in ['ocr', 'extract text', 'captcha', 'image text', 'text from image'])
 
     prompt = f"""Here is the existing index.html code:
 
@@ -243,11 +271,29 @@ GITHUB TASK - CRITICAL:
 
     if has_markdown:
         prompt += """
-MARKDOWN HANDLING (if applicable):
-- Load marked library from CDN
+MARKDOWN HANDLING - CRITICAL (if applicable):
+- Load marked library from CDN: https://cdn.jsdelivr.net/npm/marked/marked.min.js
 - Use marked.parse() to convert markdown to HTML
 - Load highlight.js for syntax highlighting if code blocks present
 - Ensure proper rendering in target element
+- Handle errors gracefully in markdown loading and parsing
+"""
+
+    if requires_ocr:
+        prompt += """
+OCR/TEXT EXTRACTION - CRITICAL (if applicable):
+- Add Tesseract.js from CDN: https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js
+- Implement image upload and OCR processing
+- Show loading progress and display extracted text clearly
+- Handle both file upload and pre-loaded images
+- Example OCR implementation:
+  Tesseract.recognize(
+    imageElementOrBlob,
+    'eng',
+    { logger: m => updateProgress(m) }
+  ).then(result => {
+    document.getElementById('ocr-result').textContent = result.data.text;
+  });
 """
 
     prompt += "\nOutput ONLY the complete updated HTML code."
@@ -278,6 +324,188 @@ REQUIREMENTS:
 - No placeholder text - make it specific to this application
 
 Output ONLY the markdown content."""
+
+
+def _validate_and_fix_html(html_content: str, brief: str, checks: list[str]) -> str:
+    """Validate and fix common HTML issues, especially for markdown and OCR tasks"""
+    
+    # Check if this is a markdown task
+    is_markdown_task = any(keyword in brief.lower() for keyword in ['markdown', '.md', 'readme']) or any('.md' in check for check in checks)
+    
+    # Check if this is an OCR task
+    is_ocr_task = any(keyword in brief.lower() for keyword in ['ocr', 'extract text', 'captcha', 'image text', 'text from image'])
+    
+    fixes_applied = []
+    
+    # Ensure proper HTML structure if missing
+    if '<!DOCTYPE html>' not in html_content:
+        html_content = '<!DOCTYPE html>\n' + html_content
+        fixes_applied.append("Added missing DOCTYPE")
+    
+    if '<html' not in html_content:
+        # Wrap content in proper HTML structure
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application</title>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+        fixes_applied.append("Added complete HTML structure")
+    
+    # For markdown tasks, ensure marked library is included and used properly
+    if is_markdown_task:
+        # Check if marked is included
+        if 'marked' not in html_content and 'marked.min.js' not in html_content:
+            # Add marked library before closing body tag
+            if '</body>' in html_content:
+                marked_script = '''
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        // Markdown rendering function
+        function renderMarkdown(markdownText, targetElementId) {
+            const target = document.getElementById(targetElementId);
+            if (target && markdownText) {
+                target.innerHTML = marked.parse(markdownText);
+            }
+        }
+        
+        // Load and render markdown files
+        function loadAndRenderMarkdown(filePath, targetElementId) {
+            fetch(filePath)
+                .then(response => {
+                    if (!response.ok) throw new Error('File not found');
+                    return response.text();
+                })
+                .then(markdownText => {
+                    renderMarkdown(markdownText, targetElementId);
+                })
+                .catch(error => {
+                    console.error('Error loading markdown:', error);
+                    const target = document.getElementById(targetElementId);
+                    if (target) {
+                        target.innerHTML = '<p>Error loading markdown file: ' + error.message + '</p>';
+                    }
+                });
+        }
+    </script>
+'''
+                html_content = html_content.replace('</body>', marked_script + '\n</body>')
+                fixes_applied.append("Added marked library and rendering functions")
+    
+    # For OCR tasks, ensure Tesseract.js is included
+    if is_ocr_task:
+        if 'tesseract' not in html_content and 'tesseract.min.js' not in html_content:
+            # Add Tesseract.js before closing body tag
+            if '</body>' in html_content:
+                tesseract_script = '''
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script>
+        // OCR function
+        async function extractTextFromImage(imageElementOrFile) {
+            const progress = document.getElementById('ocr-progress');
+            const result = document.getElementById('ocr-result');
+            
+            if (progress) progress.textContent = 'Initializing OCR...';
+            
+            try {
+                const { data: { text } } = await Tesseract.recognize(
+                    imageElementOrFile,
+                    'eng',
+                    {
+                        logger: m => {
+                            if (progress) {
+                                if (m.status === 'recognizing text') {
+                                    progress.textContent = `Progress: ${Math.round(m.progress * 100)}%`;
+                                } else {
+                                    progress.textContent = m.status;
+                                }
+                            }
+                        }
+                    }
+                );
+                
+                if (result) {
+                    result.textContent = text || 'No text detected';
+                }
+                if (progress) progress.textContent = 'OCR completed';
+                return text;
+            } catch (error) {
+                console.error('OCR Error:', error);
+                if (progress) progress.textContent = 'OCR failed';
+                if (result) result.textContent = 'Error: ' + error.message;
+                return null;
+            }
+        }
+        
+        // Handle file input for OCR
+        function setupOCRFileInput() {
+            const fileInput = document.getElementById('ocr-file-input');
+            if (fileInput) {
+                fileInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const img = new Image();
+                            img.onload = function() {
+                                extractTextFromImage(img);
+                            };
+                            img.src = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            setupOCRFileInput();
+        });
+    </script>
+'''
+                html_content = html_content.replace('</body>', tesseract_script + '\n</body>')
+                fixes_applied.append("Added Tesseract.js OCR functionality")
+    
+    # Ensure there's some basic CSS for better presentation
+    if '<style>' not in html_content:
+        basic_css = '''
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .upload-area { border: 2px dashed #ccc; padding: 20px; text-align: center; margin: 20px 0; }
+        .result-area { background: #f5f5f5; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .progress { color: #666; font-style: italic; }
+        button, input[type="file"] { margin: 10px 0; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+'''
+        # Insert CSS in head
+        if '</head>' in html_content:
+            html_content = html_content.replace('</head>', basic_css + '\n</head>')
+        elif '<head>' in html_content:
+            # Head exists but no closing tag (malformed), try to insert before body
+            if '<body>' in html_content:
+                html_content = html_content.replace('<body>', '</head>\n<body>')
+                html_content = html_content.replace('</head>', basic_css + '\n</head>')
+        else:
+            # No head found, add it
+            if '<body>' in html_content:
+                html_content = html_content.replace('<body>', '<head>' + basic_css + '\n</head>\n<body>')
+        
+        fixes_applied.append("Added basic CSS styles")
+    
+    if fixes_applied:
+        logger.info(f"Applied HTML fixes: {', '.join(fixes_applied)}")
+    
+    return html_content
 
 
 async def create_or_update_repo(task: str, round: int, brief: str, checks: list[Union[str, Dict[str, str]]], attachments: list[dict]) -> dict:
@@ -350,6 +578,9 @@ async def create_or_update_repo(task: str, round: int, brief: str, checks: list[
                     raise
 
             generated_code = await generate_with_llm(llm_prompt)
+            
+            # Validate and fix the generated HTML
+            generated_code = _validate_and_fix_html(generated_code, brief, normalized_checks)
 
             readme_prompt = _build_readme_prompt(brief, round)
 
