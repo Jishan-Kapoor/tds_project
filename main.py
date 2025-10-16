@@ -15,10 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import threading
 from typing import Union, Dict, List
-import pytesseract
-from PIL import Image
-import io
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -137,6 +133,8 @@ def _build_code_prompt(brief: str, checks: list[str], attachment_names: list[str
     is_csv_task = any(keyword in brief.lower() for keyword in ['csv', 'sales', 'sum'])
     is_github_task = 'github' in brief.lower() and 'user' in brief.lower()
     has_markdown = any('.md' in name for name in attachment_names)
+    is_ocr_task = any(
+        keyword in brief.lower() for keyword in ['ocr', 'extract text from image', 'recognize text in image'])
 
     prompt = f"""Generate a complete, functional index.html file for GitHub Pages that implements: {brief}
 
@@ -194,6 +192,19 @@ MARKDOWN HANDLING:
 - Ensure proper rendering in target element
 """
 
+    if is_ocr_task:
+        prompt += """
+
+OCR HANDLING - CRITICAL:
+- Include <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
+- Use Tesseract.createWorker('eng') to create and initialize a worker
+- Use worker.recognize('image_filename_here') where 'image_filename_here' is the name of the image attachment (e.g., 'sample.png')
+- Extract text from result.data.text and display it on the page
+- Use async/await or .then() for handling promises
+- Add loading indicators and handle errors gracefully
+- Terminate the worker after use
+"""
+
     prompt += """
 
 IMPORTANT: Output ONLY the complete HTML code, no explanations."""
@@ -201,10 +212,13 @@ IMPORTANT: Output ONLY the complete HTML code, no explanations."""
     return prompt
 
 
-def _build_update_prompt(existing_code: str, brief: str, checks: list[str], task: str, attachment_names: list[str]) -> str:
+def _build_update_prompt(existing_code: str, brief: str, checks: list[str], task: str,
+                         attachment_names: list[str]) -> str:
     is_csv_task = any(keyword in brief.lower() for keyword in ['csv', 'sales', 'sum'])
     is_github_task = task.startswith("github-user-created")
     has_markdown = any('.md' in name for name in attachment_names)
+    is_ocr_task = any(
+        keyword in brief.lower() for keyword in ['ocr', 'extract text from image', 'recognize text in image'])
 
     prompt = f"""Here is the existing index.html code:
 
@@ -254,6 +268,19 @@ MARKDOWN HANDLING (if applicable):
 - Ensure proper rendering in target element
 """
 
+    if is_ocr_task:
+        prompt += """
+
+OCR HANDLING - CRITICAL:
+- Include <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script> if not already present
+- Use Tesseract.createWorker('eng') to create and initialize a worker
+- Use worker.recognize('image_filename_here') where 'image_filename_here' is the name of the image attachment (e.g., 'sample.png')
+- Extract text from result.data.text and display it on the page
+- Use async/await or .then() for handling promises
+- Add loading indicators and handle errors gracefully
+- Terminate the worker after use
+"""
+
     prompt += "\nOutput ONLY the complete updated HTML code."
     return prompt
 
@@ -284,7 +311,8 @@ REQUIREMENTS:
 Output ONLY the markdown content."""
 
 
-async def create_or_update_repo(task: str, round: int, brief: str, checks: list[Union[str, Dict[str, str]]], attachments: list[dict]) -> dict:
+async def create_or_update_repo(task: str, round: int, brief: str, checks: list[Union[str, Dict[str, str]]],
+                                attachments: list[dict]) -> dict:
     # Normalize checks to list[str]
     normalized_checks = []
     for check in checks:
@@ -317,7 +345,8 @@ async def create_or_update_repo(task: str, round: int, brief: str, checks: list[
                     logger.info(f"No existing repo to delete: {str(e)}")
                 try:
                     repo = await loop.run_in_executor(executor,
-                                                      lambda: user.create_repo(repo_name, private=False, auto_init=False))
+                                                      lambda: user.create_repo(repo_name, private=False,
+                                                                               auto_init=False))
                     logger.info(f"Created repo: {repo_name}")
                 except GithubException as e:
                     logger.error(f"Failed to create repo: {str(e)}")
@@ -331,48 +360,28 @@ async def create_or_update_repo(task: str, round: int, brief: str, checks: list[
                     raise
 
             attachment_files = {}
-            ocr_texts = []  # To store text extracted from images
             for att in attachments:
                 try:
                     name, content = decode_attachment(att)
-                    # Always save the original file to be committed to the repo
                     attachment_files[name] = content
-
-                    # NEW: Check if the attachment is an image and run OCR
-                    if name.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
-                        logger.info(f"Running OCR on image attachment: {name}")
-                        extracted_text = extract_text_from_image(content)
-                        if extracted_text:
-                            # Add a header to the extracted text for clarity
-                            ocr_texts.append(f"Text from image '{name}':\n---\n{extracted_text}\n---")
-
                 except ValueError as e:
                     logger.error(f"Invalid attachment: {str(e)}")
                     raise
 
-            # Combine the original brief with any text found in images
-            full_brief = brief
-            if ocr_texts:
-                full_brief += "\n\nADDITIONAL CONTEXT FROM IMAGE ATTACHMENTS:\n" + "\n".join(ocr_texts)
-
             attachment_names = list(attachment_files.keys())
 
             if round == 1:
-                # Use the new `full_brief` which may contain OCR text
-                llm_prompt = _build_code_prompt(full_brief, normalized_checks, attachment_names, round)
+                llm_prompt = _build_code_prompt(brief, normalized_checks, attachment_names, round)
             else:
                 try:
                     existing_index = await loop.run_in_executor(executor, lambda: repo.get_contents("index.html"))
                     existing_index_content = existing_index.decoded_content.decode()
-                    # Use the new `full_brief` for updates as well
-                    llm_prompt = _build_update_prompt(existing_index_content, full_brief, normalized_checks, task,
+                    llm_prompt = _build_update_prompt(existing_index_content, brief, normalized_checks, task,
                                                       attachment_names)
                     logger.info("Fetched existing index.html for round > 1")
                 except GithubException as e:
                     logger.error(f"Failed to fetch existing code: {str(e)}")
                     raise
-
-
 
             generated_code = await generate_with_llm(llm_prompt)
 
@@ -401,18 +410,21 @@ async def create_or_update_repo(task: str, round: int, brief: str, checks: list[
                 "README.md": generated_readme.encode('utf-8'),
             }
             if round == 1:
-                files_to_upload["LICENSE"] = MIT_LICENSE.format(year=time.strftime("%Y"), username=GITHUB_USERNAME).encode(
+                files_to_upload["LICENSE"] = MIT_LICENSE.format(year=time.strftime("%Y"),
+                                                                username=GITHUB_USERNAME).encode(
                     'utf-8')
             files_to_upload.update({name: content for name, content in attachment_files.items()})
 
             for path, content in files_to_upload.items():
                 try:
                     existing = await loop.run_in_executor(executor, lambda: repo.get_contents(path, ref=branch))
-                    await loop.run_in_executor(executor, lambda: repo.update_file(path, commit_msg, content, existing.sha,
-                                                                                  branch=branch))
+                    await loop.run_in_executor(executor,
+                                               lambda: repo.update_file(path, commit_msg, content, existing.sha,
+                                                                        branch=branch))
                     logger.info(f"Updated file: {path}")
                 except GithubException:
-                    await loop.run_in_executor(executor, lambda: repo.create_file(path, commit_msg, content, branch=branch))
+                    await loop.run_in_executor(executor,
+                                               lambda: repo.create_file(path, commit_msg, content, branch=branch))
                     logger.info(f"Created file: {path}")
 
             pages_check = await loop.run_in_executor(
@@ -532,16 +544,6 @@ async def process_background(req: RequestBody, start_time: float):
 
 used_nonces = set()
 nonce_lock = threading.Lock()
-
-def extract_text_from_image(image_bytes: bytes) -> str:
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-        text = pytesseract.image_to_string(image)
-        return text.strip()
-    except Exception as e:
-        logger.error(f"OCR failed: {str(e)}")
-        return ""
-
 
 
 @app.post("/api-endpoint")
